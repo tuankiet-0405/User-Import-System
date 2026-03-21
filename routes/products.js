@@ -2,6 +2,8 @@ const express = require('express')
 let router = express.Router()
 let slugify = require('slugify')
 let productSchema = require('../schemas/products')
+let inventorySchema = require('../schemas/inventories')
+let mongoose = require('mongoose')
 
 router.get('/', async (req, res) => {
     let queries = req.query;
@@ -9,7 +11,7 @@ router.get('/', async (req, res) => {
     let result = await productSchema.find({
         isDeleted: false,
         price: {
-            $gte:minQ
+            $gte: minQ
         }
     }).populate(
         { path: 'category', select: 'name' }
@@ -35,22 +37,41 @@ router.get('/:id', async (req, res) => {//req.params
         })
     }
 })
-
+// REPLICA SET
+// LOCAL : bat replica set
+// ATLAS: co san
 router.post('/', async (req, res) => {
-    let newProducts = new productSchema({
-        title: req.body.title,
-        slug: slugify(req.body.title, {
-            replacement: '-',
-            lower: false,
-            remove: undefined,
-        }),
-        description: req.body.description,
-        category: req.body.category,
-        images: req.body.images,
-        price: req.body.price
-    })
-    await newProducts.save()
-    res.send(newProducts)
+    let session = await mongoose.startSession()
+    session.startTransaction()
+    try {
+        let newProducts = new productSchema({
+            title: req.body.title,
+            slug: slugify(req.body.title, {
+                replacement: '-',
+                lower: false,
+                remove: undefined,
+            }),
+            description: req.body.description,
+            category: req.body.category,
+            images: req.body.images,
+            price: req.body.price
+        })
+        await newProducts.save({ session })
+        console.log(newProducts);
+        let newInventory = new inventorySchema({
+            product: newProducts._id,
+            stock: -1
+        })
+        await newInventory.save({ session });
+        await newInventory.populate('product')
+        session.commitTransaction();
+        session.endSession()
+        res.send(newInventory)
+    } catch (error) {
+        session.abortTransaction();
+        session.endSession()
+        res.status(404).send(error.message)
+    }
 })
 router.put('/:id', async (req, res) => {
     try {
